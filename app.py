@@ -8,6 +8,7 @@ from analyst import B3StockAnalyst
 from screener import B3MarketScreener, get_universe_by_name
 from fixed_income_analyst import FixedIncomeAnalyst, MacroEconomicContext
 from fii_analyst import FIIAnalyst, FII_METADATA
+from sentiment_analyzer import MarketSentimentAnalyzer, MarketSentimentOverview
 
 # Configuração da Página
 st.set_page_config(
@@ -31,41 +32,44 @@ st.markdown("""
         color: #888888;
         margin-bottom: 25px;
     }
-    .verdict-compra, .verdict-forte-compra {
+    .verdict-compra, .verdict-forte-compra, .badge-otimista {
         background-color: #1B5E20;
         color: #FFFFFF;
-        padding: 6px 14px;
+        padding: 5px 12px;
         border-radius: 8px;
         font-weight: bold;
         display: inline-block;
+        font-size: 0.9rem;
     }
-    .verdict-manter, .verdict-neutro {
+    .verdict-manter, .verdict-neutro, .badge-neutro {
         background-color: #E65100;
         color: #FFFFFF;
-        padding: 6px 14px;
+        padding: 5px 12px;
         border-radius: 8px;
         font-weight: bold;
         display: inline-block;
+        font-size: 0.9rem;
     }
-    .verdict-venda, .verdict-evitar {
+    .verdict-venda, .verdict-evitar, .verdict-cuidado---evitar, .badge-alerta {
         background-color: #B71C1C;
         color: #FFFFFF;
-        padding: 6px 14px;
+        padding: 5px 12px;
         border-radius: 8px;
         font-weight: bold;
         display: inline-block;
+        font-size: 0.9rem;
     }
-    .macro-card {
+    .news-card {
         background-color: #1E222D;
         border: 1px solid #2A2E39;
-        border-radius: 10px;
-        padding: 15px;
-        margin-bottom: 15px;
+        border-radius: 8px;
+        padding: 12px 16px;
+        margin-bottom: 12px;
     }
 </style>
 """, unsafe_allow_html=True)
 
-# Cache de dados para respostas ultrarrápidas
+# Cache de dados para performance rápida
 @st.cache_data(ttl=600, show_spinner=False)
 def get_cached_stock(ticker: str):
     return fetch_b3_stock(ticker)
@@ -81,32 +85,39 @@ def get_cached_fii(ticker: str):
     return analyst.fetch_fii_data(ticker)
 
 @st.cache_data(ttl=900, show_spinner=False)
-def run_cached_fii_scan(top_n: int):
+def run_cached_fii_scan(top_n: int, apenas_barganhas: bool):
     analyst = FIIAnalyst()
-    return analyst.scan_fiis(top_n=top_n)
+    return analyst.scan_fiis(top_n=top_n, apenas_barganhas=apenas_barganhas)
+
+@st.cache_data(ttl=300, show_spinner=False)
+def get_cached_sentiment():
+    analyzer = MarketSentimentAnalyzer()
+    return analyzer.fetch_live_sentiment()
 
 # Barra Lateral
 st.sidebar.title("📈 Analista B3 Multi-Ativos")
-st.sidebar.caption("Ações • Títulos Públicos • Fundos Imobiliários")
+st.sidebar.caption("Inteligência Fundamentalista, FIIs e Sentimento")
 st.sidebar.divider()
 
 modo = st.sidebar.radio(
-    "Navegação:",
+    "Navegação Principal:",
     [
         "🎯 Varredura de Ações (Deep Value)",
         "🔍 Raio-X de Ação Individual",
+        "🏢 Fundos Imobiliários (FIIs - Barganhas & Spreads)",
         "🏛️ Renda Fixa & Títulos Públicos (Tesouro)",
-        "🏢 Fundos Imobiliários (FIIs)"
+        "🔥 Sentimento de Mercado & Trending (B3)"
     ],
     index=0
 )
 
 st.sidebar.divider()
 st.sidebar.info(
-    "💡 **Cobertura Completa:**\n"
+    "💡 **Recursos do Agente:**\n"
     "• **Ações:** Desconto de múltiplos, balanço e anti-alucinação.\n"
-    "• **Renda Fixa:** Selic, IPCA+, juro real e marcação a mercado.\n"
-    "• **FIIs:** P/VP de Tijolo e Papel, vacância, proventos e IFIX."
+    "• **FIIs:** P/VP, spread vs NTN-B e filtro anti-ciladas.\n"
+    "• **Renda Fixa:** Taxa real IPCA+ e simulador líquido.\n"
+    "• **Sentimento:** Índice de Medo & Ganância e ativos em alta."
 )
 
 # -----------------------------------------------------------------------------
@@ -253,7 +264,105 @@ elif modo == "🔍 Raio-X de Ação Individual":
             st.error(f"Erro ao analisar a ação {ticker_input}: {e}")
 
 # -----------------------------------------------------------------------------
-# MODO 3: RENDA FIXA & TÍTULOS PÚBLICOS (TESOURO DIRETO)
+# MODO 3: FUNDOS IMOBILIÁRIOS (FIIS - AVALIAÇÃO DE DESCONTO AVANÇADA)
+# -----------------------------------------------------------------------------
+elif modo == "🏢 Fundos Imobiliários (FIIs - Barganhas & Spreads)":
+    st.markdown('<div class="main-header">🏢 Fundos Imobiliários: Garimpo de Barganhas & Spreads</div>', unsafe_allow_html=True)
+    st.markdown('<div class="sub-header">Identifique ativos com desconto patrimonial real, prêmio sobre o Tesouro IPCA+ e expurgo de armadilhas.</div>', unsafe_allow_html=True)
+
+    sub_fii = st.radio("Selecione a Ferramenta de FIIs:", ["🏆 Varredura dos Maiores FIIs do IFIX", "🔍 Raio-X Detalhado de FII"], horizontal=True)
+
+    if sub_fii == "🏆 Varredura dos Maiores FIIs do IFIX":
+        col_fii_cfg1, col_fii_cfg2, col_fii_cfg3 = st.columns([2, 1, 1])
+        with col_fii_cfg1:
+            apenas_barganhas = st.checkbox("🛡️ Ocultar Armadilhas de Valor (Exibir apenas Barganhas Reais)", value=True)
+        with col_fii_cfg2:
+            top_fii_n = st.slider("Qtd. de Fundos:", min_value=5, max_value=20, value=10)
+        with col_fii_cfg3:
+            btn_scan_fii = st.button("🚀 Escanear FIIs", type="primary", use_container_width=True)
+
+        if btn_scan_fii or "last_fii_scan" in st.session_state:
+            if btn_scan_fii:
+                with st.spinner("Analisando FIIs, spreads vs NTN-B e diagnóstico de desconto..."):
+                    top_fiis = run_cached_fii_scan(top_n=top_fii_n, apenas_barganhas=apenas_barganhas)
+                    st.session_state["last_fii_scan"] = top_fiis
+            else:
+                top_fiis = st.session_state["last_fii_scan"]
+
+            fii_table = []
+            for i, f in enumerate(top_fiis, 1):
+                fii_table.append({
+                    "Ranking": f"#{i}",
+                    "Ticker": f.ticker,
+                    "Nome": f.nome,
+                    "Segmento": f.segmento,
+                    "Cotação": f"R$ {f.preco_atual:.2f}",
+                    "P/VP": f"{f.pvp:.2f}x" if f.pvp else "N/A",
+                    "DY Anual": f"{f.dividend_yield_anual:.1f}%",
+                    "Rend. Mensal Isento": f"~{f.rendimento_mensal_estimado:.2f}% a.m.",
+                    "Spread vs NTN-B": f"+{f.spread_vs_ntnb:.1f}% a.a." if f.spread_vs_ntnb >= 0 else f"{f.spread_vs_ntnb:.1f}%",
+                    "Diagnóstico": f.diagnostico_desconto,
+                    "Score FII": f"{f.score_fii} / 100"
+                })
+            st.dataframe(pd.DataFrame(fii_table), use_container_width=True, hide_index=True)
+
+            st.caption("📌 **Nota:** O *Spread vs NTN-B* calcula quanto o rendimento isento do FII supera a taxa de juros real do Tesouro IPCA+ longo (referência 6,70% a.a.).")
+
+    else:
+        fii_col_in, fii_col_bt = st.columns([3, 1])
+        with fii_col_in:
+            fii_ticker = st.text_input("Código do FII (ex: HGLG11, BTLG11, KNIP11, MXRF11, XPML11, HGRU11):", value="HGLG11").upper().strip()
+        with fii_col_bt:
+            st.write("")
+            st.write("")
+            btn_fii = st.button("📊 Analisar FII", use_container_width=True, type="primary")
+
+        if fii_ticker:
+            try:
+                with st.spinner(f"Coletando cotas, múltiplos e proventos de {fii_ticker}..."):
+                    fii_data = get_cached_fii(fii_ticker)
+
+                st.divider()
+                fh1, fh2, fh3 = st.columns([2, 1, 1])
+                with fh1:
+                    st.markdown(f"### {fii_data.ticker} - {fii_data.nome}")
+                    st.caption(f"Segmento: {fii_data.segmento} | Perfil: {fii_data.perfil}")
+                with fh2:
+                    f_class = f"verdict-{fii_data.veredito.lower().replace(' ', '-').replace('/', '-')}"
+                    st.markdown(f"**Veredito do Agente:**")
+                    st.markdown(f'<span class="{f_class}">{fii_data.veredito}</span>', unsafe_allow_html=True)
+                with fh3:
+                    st.metric("Score do FII", f"{fii_data.score_fii} / 100")
+
+                # Métricas Chave
+                fm1, fm2, fm3, fm4, fm5 = st.columns(5)
+                fm1.metric("Cotação Atual", f"R$ {fii_data.preco_atual:.2f}")
+                fm2.metric("P/VP", f"{fii_data.pvp:.2f}x" if fii_data.pvp else "N/A")
+                fm3.metric("DY Anualizado", f"{fii_data.dividend_yield_anual:.1f}%")
+                fm4.metric("Rend. Bruto Equiv.", f"{fii_data.rendimento_bruto_equivalente:.1f}% a.a.")
+                fm5.metric("Spread vs NTN-B", f"+{fii_data.spread_vs_ntnb:.1f}% a.a." if fii_data.spread_vs_ntnb >= 0 else f"{fii_data.spread_vs_ntnb:.1f}%")
+
+                st.info(f"**Diagnóstico de Desconto do FII:** {fii_data.diagnostico_desconto}")
+
+                st.divider()
+                st.markdown("#### 🎯 Tese de Investimento do Agente")
+                st.write(fii_data.tese)
+
+                fc1, fc2 = st.columns(2)
+                with fc1:
+                    st.markdown("#### 🚀 Catalisadores & Margem de Segurança")
+                    for c in fii_data.catalisadores:
+                        st.write(f"• {c}")
+                with fc2:
+                    st.markdown("#### ⚠️ Riscos do FII (Vacância, Dívida & Juros)")
+                    for r in fii_data.riscos:
+                        st.write(f"• {r}")
+
+            except Exception as e:
+                st.error(f"Erro ao analisar o FII {fii_ticker}: {e}")
+
+# -----------------------------------------------------------------------------
+# MODO 4: RENDA FIXA & TÍTULOS PÚBLICOS (TESOURO DIRETO)
 # -----------------------------------------------------------------------------
 elif modo == "🏛️ Renda Fixa & Títulos Públicos (Tesouro)":
     st.markdown('<div class="main-header">🏛️ Renda Fixa Soberana & Títulos Públicos</div>', unsafe_allow_html=True)
@@ -262,7 +371,6 @@ elif modo == "🏛️ Renda Fixa & Títulos Públicos (Tesouro)":
     rf_engine = FixedIncomeAnalyst()
     macro = rf_engine.macro
 
-    # Painel Macro Brasil
     st.markdown("### 📊 Termômetro Macroeconômico Atual do Brasil")
     mc1, mc2, mc3, mc4, mc5 = st.columns(5)
     mc1.metric("Taxa Selic Meta", f"{macro.selic_meta:.2f}% a.a.")
@@ -272,8 +380,6 @@ elif modo == "🏛️ Renda Fixa & Títulos Públicos (Tesouro)":
     mc5.metric("Risco Fiscal", macro.risco_fiscal_status)
 
     st.divider()
-
-    # Análise dos 3 Grandes Títulos Soberanos
     st.markdown("### 🎯 Avaliação e Vereditos dos Títulos Públicos")
 
     selic_bond = rf_engine.analyze_tesouro_selic()
@@ -343,8 +449,6 @@ elif modo == "🏛️ Renda Fixa & Títulos Públicos (Tesouro)":
                 st.write(f"• {r}")
 
     st.divider()
-
-    # Simulador Comparativo
     st.markdown("### 🧮 Simulador de Rentabilidade Líquida (Após IR)")
     sim_col1, sim_col2 = st.columns([1, 1])
     with sim_col1:
@@ -360,87 +464,62 @@ elif modo == "🏛️ Renda Fixa & Títulos Públicos (Tesouro)":
     s4.metric("Poupança (Isenta)", f"R$ {sim_res['poupanca']:,.2f}", delta=f"-R$ {sim_res['ganho_extra_vs_poupanca']:,.2f}", delta_color="inverse")
 
 # -----------------------------------------------------------------------------
-# MODO 4: FUNDOS IMOBILIÁRIOS (FIIS)
+# MODO 5: SENTIMENTO DE MERCADO & TRENDING (B3)
 # -----------------------------------------------------------------------------
-elif modo == "🏢 Fundos Imobiliários (FIIs)":
-    st.markdown('<div class="main-header">🏢 Fundos de Investimento Imobiliário (FIIs)</div>', unsafe_allow_html=True)
-    st.markdown('<div class="sub-header">Análise completa de Tijolo, Papel (CRIs) e Renda Urbana com métricas do IFIX.</div>', unsafe_allow_html=True)
+elif modo == "🔥 Sentimento de Mercado & Trending (B3)":
+    st.markdown('<div class="main-header">🔥 Sentimento de Mercado & Trending na B3</div>', unsafe_allow_html=True)
+    st.markdown('<div class="sub-header">Radar de notícias em tempo real, ativos mais comentados e termômetro de Medo & Ganância.</div>', unsafe_allow_html=True)
 
-    sub_fii = st.radio("Selecione a Ferramenta de FIIs:", ["🏆 Varredura dos Principais FIIs", "🔍 Raio-X de FII Individual"], horizontal=True)
+    with st.spinner("Monitorando portais de notícias e menções de ativos da B3..."):
+        sentiment_data = get_cached_sentiment()
 
-    if sub_fii == "🏆 Varredura dos Principais FIIs":
-        st.write("Varredura focada na relação **P/VP**, fluxo de dividendos mensais isentos e risco de crédito/vacância.")
-        if st.button("🚀 Escanear Melhores Oportunidades em FIIs", type="primary"):
-            with st.spinner("Analisando principais fundos imobiliários da B3..."):
-                top_fiis = run_cached_fii_scan(top_n=10)
-                st.session_state["last_fii_scan"] = top_fiis
-        
-        if "last_fii_scan" in st.session_state:
-            top_fiis = st.session_state["last_fii_scan"]
-            fii_table = []
-            for i, f in enumerate(top_fiis, 1):
-                fii_table.append({
-                    "Ranking": f"#{i}",
-                    "Ticker": f.ticker,
-                    "Nome": f.nome,
-                    "Segmento": f.segmento,
-                    "Cotação": f"R$ {f.preco_atual:.2f}",
-                    "P/VP": f"{f.pvp:.2f}x" if f.pvp else "N/A",
-                    "DY 12M": f"{f.dividend_yield_anual:.1f}%",
-                    "Rend. Mensal Est.": f"~{f.rendimento_mensal_estimado:.2f}%",
-                    "IFR 14": f"{f.rsi_14:.1f}" if f.rsi_14 else "N/A",
-                    "Veredito": f.veredito,
-                    "Score FII": f"{f.score_fii} / 100"
-                })
-            st.dataframe(pd.DataFrame(fii_table), use_container_width=True, hide_index=True)
+    # Painel de Medo & Ganância (Fear & Greed)
+    st.markdown("### 🧭 Termômetro de Medo & Ganância (B3 Sentiment Index)")
+    
+    fg_col1, fg_col2, fg_col3 = st.columns([1, 1, 1])
+    with fg_col1:
+        st.metric("Índice de Sentimento", f"{sentiment_data.fear_greed_score} / 100")
+    with fg_col2:
+        st.metric("Diagnóstico do Humor", sentiment_data.fear_greed_label)
+    with fg_col3:
+        st.metric("Balanço de Manchetes", f"🟢 {sentiment_data.positive_ratio}% Otimistas | 🔴 {sentiment_data.negative_ratio}% Alertas")
 
+    st.progress(sentiment_data.fear_greed_score / 100)
+
+    st.divider()
+
+    # Ativos Mais Comentados
+    st.markdown("### 🗣️ Ativos Mais Comentados do Momento na B3")
+    st.caption("Ações e FIIs que estão liderando a cobertura e as atenções dos investidores hoje:")
+
+    if sentiment_data.trending_assets:
+        trend_cols = st.columns(min(len(sentiment_data.trending_assets), 4))
+        for idx, asset in enumerate(sentiment_data.trending_assets[:4]):
+            with trend_cols[idx]:
+                badge_class = f"badge-{asset.sentiment_label.lower()}"
+                st.markdown(f"#### {asset.ticker}")
+                st.markdown(f"<span class='{badge_class}'>{asset.sentiment_label}</span>", unsafe_allow_html=True)
+                st.write(f"**Menções:** {asset.mentions} notícias recentes")
+                st.caption(f"\"{asset.sample_headline[:80]}...\"")
     else:
-        fii_col_in, fii_col_bt = st.columns([3, 1])
-        with fii_col_in:
-            fii_ticker = st.text_input("Código do FII (ex: HGLG11, KNIP11, MXRF11, XPML11, BTLG11):", value="HGLG11").upper().strip()
-        with fii_col_bt:
-            st.write("")
-            st.write("")
-            btn_fii = st.button("📊 Analisar FII", use_container_width=True, type="primary")
+        st.info("Nenhum ativo com volume anormal de menções nas últimas horas.")
 
-        if fii_ticker:
-            try:
-                with st.spinner(f"Coletando dados cadastrais, cotas e dividendos de {fii_ticker}..."):
-                    fii_data = get_cached_fii(fii_ticker)
+    st.divider()
 
-                st.divider()
-                fh1, fh2, fh3 = st.columns([2, 1, 1])
-                with fh1:
-                    st.markdown(f"### {fii_data.ticker} - {fii_data.nome}")
-                    st.caption(f"Segmento: {fii_data.segmento} | Tipo: {fii_data.tipo_fii}")
-                with fh2:
-                    f_class = f"verdict-{fii_data.veredito.lower().replace(' ', '-')}"
-                    st.markdown(f"**Veredito do Agente:**")
-                    st.markdown(f'<span class="{f_class}">{fii_data.veredito}</span>', unsafe_allow_html=True)
-                with fh3:
-                    st.metric("Score do FII", f"{fii_data.score_fii} / 100")
-
-                # Métricas
-                fm1, fm2, fm3, fm4, fm5 = st.columns(5)
-                fm1.metric("Cotação Atual", f"R$ {fii_data.preco_atual:.2f}")
-                fm2.metric("P/VP", f"{fii_data.pvp:.2f}x" if fii_data.pvp else "N/A")
-                fm3.metric("DY Anualizado", f"{fii_data.dividend_yield_anual:.1f}%")
-                fm4.metric("Rend. Mensal Isento", f"~{fii_data.rendimento_mensal_estimado:.2f}% a.m.")
-                fm5.metric("IFR 14 (RSI)", f"{fii_data.rsi_14:.1f}" if fii_data.rsi_14 else "N/A")
-
-                st.divider()
-                st.markdown("#### 🎯 Tese do Agente para o Fundo")
-                st.write(fii_data.tese)
-
-                fc1, fc2 = st.columns(2)
-                with fc1:
-                    st.markdown("#### 🚀 Catalisadores & Pontos Fortes")
-                    for c in fii_data.catalisadores:
-                        st.write(f"• {c}")
-                with fc2:
-                    st.markdown("#### ⚠️ Riscos do FII (Vacância & Crédito)")
-                    for r in fii_data.riscos:
-                        st.write(f"• {r}")
-
-            except Exception as e:
-                st.error(f"Erro ao analisar o FII {fii_ticker}: {e}")
+    # Feed de Notícias em Tempo Real
+    st.markdown("### 📰 Feed de Notícias Monitoradas com Classificação de Sentimento")
+    for n in sentiment_data.news_feed:
+        badge_class = f"badge-{n.sentiment_label.lower()}"
+        tickers_str = " | ".join(n.mentioned_tickers) if n.mentioned_tickers else "B3 Geral"
+        st.markdown(f"""
+        <div class="news-card">
+            <span class="{badge_class}">{n.sentiment_label}</span>
+            <strong style="margin-left: 10px;">{tickers_str}</strong>
+            <span style="float: right; color: #888888; font-size: 0.85rem;">{n.source} • {n.published}</span>
+            <div style="margin-top: 8px;">
+                <a href="{n.link}" target="_blank" style="text-decoration: none; color: #E0E0E0; font-size: 1.02rem; font-weight: 500;">
+                    {n.title} ↗
+                </a>
+            </div>
+        </div>
+        """, unsafe_allow_html=True)
