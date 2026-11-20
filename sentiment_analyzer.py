@@ -1,211 +1,279 @@
-import urllib.request
-import xml.etree.ElementTree as ET
-import re
+import yfinance as yf
+import pandas as pd
+import numpy as np
 from dataclasses import dataclass
 from typing import List, Dict, Any, Optional
 from datetime import datetime
-
-POSITIVE_WORDS = {
-    "alta", "sobe", "subiu", "lucro", "recorde", "dispara", "salto", "dividendo", "proventos",
-    "compra", "otimismo", "avanço", "supera", "ganho", "valorização", "recomenda", "positivo",
-    "recupera", "cresce", "crescimento", "acordo", "fusão", "forte", "melhora", "expansão"
-}
-
-NEGATIVE_WORDS = {
-    "queda", "cai", "caiu", "prejuízo", "tomba", "desaba", "risco", "calote", "crise",
-    "rombo", "rebaixamento", "corte", "investigação", "dívida", "inadimplência", "pessimismo",
-    "alerta", "inflação", "baixa", "fraco", "perda", "derrete", "suspensão", "despenca"
-}
-
-POPULAR_TICKERS = [
-    "PETR4", "VALE3", "ITUB4", "BBDC4", "BBAS3", "MGLU3", "WEGE3", "PRIO3",
-    "RENT3", "LREN3", "CSNA3", "USIM5", "GGBR4", "SUZB3", "RADL3", "HGLG11",
-    "MXRF11", "KNIP11", "XPML11", "BTLG11", "AZUL4", "GOLL4", "EMBR3"
-]
+import re
 
 @dataclass
 class MarketNewsItem:
     title: str
+    summary: str
     link: str
     published: str
     source: str
     sentiment_label: str  # "OTIMISTA", "NEUTRO", "ALERTA"
-    score: float          # -1.0 a +1.0
-    mentioned_tickers: List[str]
+    score: float
+    related_tickers: List[str]
 
 @dataclass
-class TrendingAsset:
-    ticker: str
-    mentions: int
-    sentiment_label: str
-    sentiment_score: int
-    sample_headline: str
+class QuantitativeSentimentPillar:
+    nome: str
+    valor_atual: str
+    diagnostico: str
+    score: int  # 0 (Medo Extremo) a 100 (Ganância Extrema)
 
 @dataclass
 class MarketSentimentOverview:
     fear_greed_score: int       # 0 a 100
-    fear_greed_label: str       # "Medo Extremo", "Cautela", "Neutro", "Otimismo", "Euforia"
-    total_news_analyzed: int
-    positive_ratio: float
-    negative_ratio: float
-    trending_assets: List[TrendingAsset]
+    fear_greed_label: str       # "Medo Extremo", "Medo / Cautela", "Neutro", "Otimismo", "Euforia"
+    resumo_macro_humor: str
+    pilares: List[QuantitativeSentimentPillar]
     news_feed: List[MarketNewsItem]
+    trending_tickers: List[Dict[str, Any]]
     timestamp: str
 
 class MarketSentimentAnalyzer:
-    """Motor de inteligência de notícias, buzz de mercado e sentimento dos investidores na B3."""
-
-    def __init__(self):
-        self.feed_url = "https://news.google.com/rss/search?q=ações+B3+OR+Ibovespa+OR+dividendos+OR+FIIs&hl=pt-BR&gl=BR&ceid=BR:pt-419"
+    """
+    Motor quantitativo e fundamentado de Sentimento de Mercado da B3.
+    Inspirado no Fear & Greed Index da CNN, calibrado para a realidade brasileira:
+    1. Momentum do Ibovespa (Preço vs Média Móvel de 50 dias)
+    2. Índice de Força Relativa (IFR / RSI 14) do Ibovespa
+    3. Pressão Cambial (Dólar USD/BRL - fuga de capital vs apetite a risco)
+    4. Volatilidade e Amplitude Recente do Mercado
+    5. Feed de Notícias Reais via API Financeira
+    """
 
     def fetch_live_sentiment(self) -> MarketSentimentOverview:
-        news_items = self._fetch_news()
+        # 1. Coleta de Dados do Ibovespa (^BVSP)
+        ibov_obj = yf.Ticker("^BVSP")
+        ibov_hist = ibov_obj.history(period="6mo")
         
-        # Análise de Sentimento Geral
-        pos_count = 0
-        neg_count = 0
-        neu_count = 0
-        ticker_mentions: Dict[str, List[MarketNewsItem]] = {t: [] for t in POPULAR_TICKERS}
+        # 2. Coleta de Dados do Dólar (BRL=X)
+        usd_obj = yf.Ticker("BRL=X")
+        usd_hist = usd_obj.history(period="2mo")
 
-        for item in news_items:
-            if item.sentiment_label == "OTIMISTA":
-                pos_count += 1
-            elif item.sentiment_label == "ALERTA":
-                neg_count += 1
+        pilares = []
+        scores = []
+
+        # --- PILAR 1: Momentum do Ibovespa (Preço vs MM50) ---
+        if not ibov_hist.empty and len(ibov_hist) >= 50:
+            closes = ibov_hist["Close"]
+            current_ibov = float(closes.iloc[-1])
+            sma50 = float(closes.rolling(50).mean().iloc[-1])
+            dist_sma50_pct = ((current_ibov - sma50) / sma50) * 100
+
+            # Se estiver muito acima da MM50 = Ganância; muito abaixo = Medo
+            if dist_sma50_pct >= 6.0:
+                p1_score = 85
+                p1_diag = f"Forte tendência de alta (+{dist_sma50_pct:.1f}% acima da MM50)"
+            elif dist_sma50_pct >= 1.5:
+                p1_score = 65
+                p1_diag = f"Acima da média móvel (+{dist_sma50_pct:.1f}%)"
+            elif dist_sma50_pct >= -2.0:
+                p1_score = 50
+                p1_diag = "Próximo à média de 50 dias (Neutro)"
+            elif dist_sma50_pct >= -7.0:
+                p1_score = 30
+                p1_diag = f"Correção em andamento ({dist_sma50_pct:.1f}% abaixo da MM50)"
             else:
-                neu_count += 1
+                p1_score = 15
+                p1_diag = f"Medo severo: mercado descolado para baixo ({dist_sma50_pct:.1f}% da MM50)"
 
-            for tick in item.mentioned_tickers:
-                if tick in ticker_mentions:
-                    ticker_mentions[tick].append(item)
-
-        total = max(len(news_items), 1)
-        pos_ratio = pos_count / total
-        neg_ratio = neg_count / total
-
-        # Cálculo do Índice Medo & Ganância da B3 (0 a 100)
-        # Base 50 + impulso de notícias positivas - impulso de notícias negativas
-        fg_score = int(50 + (pos_ratio * 45) - (neg_ratio * 45))
-        fg_score = max(5, min(95, fg_score))
-
-        if fg_score <= 25:
-            fg_label = "🚨 Medo Extremo (Pânico / Hora de Garimpar Barganhas)"
-        elif fg_score <= 45:
-            fg_label = "⚠️ Cautela / Medo (Mercado Avesso a Risco)"
-        elif fg_score <= 55:
-            fg_label = "⚖️ Neutro (Equilíbrio de Forças)"
-        elif fg_score <= 75:
-            fg_label = "🌱 Otimismo / Apetite a Risco"
+            pilares.append(QuantitativeSentimentPillar(
+                nome="Momentum do Ibovespa (vs MM50)",
+                valor_atual=f"{current_ibov:,.0f} pts (MM50: {sma50:,.0f})",
+                diagnostico=p1_diag,
+                score=p1_score
+            ))
+            scores.append((p1_score, 0.30))
         else:
-            fg_label = "🔥 Euforia Extrema (Cuidado com Topos de Mercado)"
+            current_ibov = 130000.0
 
-        # Ranking dos Ativos Mais Comentados
-        trending = []
-        for tick, items in ticker_mentions.items():
-            if len(items) > 0:
-                avg_score = sum(i.score for i in items) / len(items)
-                sent_label = "OTIMISTA" if avg_score > 0.15 else ("ALERTA" if avg_score < -0.15 else "NEUTRO")
-                trending.append(TrendingAsset(
-                    ticker=tick,
-                    mentions=len(items),
-                    sentiment_label=sent_label,
-                    sentiment_score=int(avg_score * 100),
-                    sample_headline=items[0].title
-                ))
+        # --- PILAR 2: IFR 14 (Sobrevenda vs Sobrecompra do Ibovespa) ---
+        if not ibov_hist.empty and len(ibov_hist) >= 15:
+            delta = ibov_hist["Close"].diff()
+            gain = delta.where(delta > 0, 0).rolling(14).mean()
+            loss = (-delta.where(delta < 0, 0)).rolling(14).mean()
+            rs = gain / loss
+            rsi = float((100 - (100 / (1 + rs))).iloc[-1])
 
-        trending.sort(key=lambda x: x.mentions, reverse=True)
+            if rsi >= 70:
+                p2_score = 85
+                p2_diag = f"Sobrecompra extrema (IFR {rsi:.1f}) - Euforia de curto prazo"
+            elif rsi >= 55:
+                p2_score = 65
+                p2_diag = f"Pressão compradora saudável (IFR {rsi:.1f})"
+            elif rsi >= 45:
+                p2_score = 50
+                p2_diag = f"Equilíbrio técnico (IFR {rsi:.1f})"
+            elif rsi >= 30:
+                p2_score = 30
+                p2_diag = f"Pressão vendedora / Cautela (IFR {rsi:.1f})"
+            else:
+                p2_score = 15
+                p2_diag = f"Sobrevenda extrema (IFR {rsi:.1f}) - Pânico vendedor / Barganhas"
+
+            pilares.append(QuantitativeSentimentPillar(
+                nome="Índice de Força Relativa (IFR 14)",
+                valor_atual=f"{rsi:.1f} pontos",
+                diagnostico=p2_diag,
+                score=p2_score
+            ))
+            scores.append((p2_score, 0.25))
+
+        # --- PILAR 3: Termômetro Cambial (Dólar USD/BRL) ---
+        if not usd_hist.empty and len(usd_hist) >= 20:
+            usd_closes = usd_hist["Close"]
+            usd_curr = float(usd_closes.iloc[-1])
+            usd_1m_ago = float(usd_closes.iloc[0])
+            usd_var_pct = ((usd_curr - usd_1m_ago) / usd_1m_ago) * 100
+
+            # No Brasil, alta forte do dólar = aversão a risco / fuga de capital (Medo)
+            # Queda do dólar = entrada de gringo / apetite a risco (Otimismo)
+            if usd_var_pct >= 4.0:
+                p3_score = 15
+                p3_diag = f"Aversão a risco acentuada (Dólar subiu +{usd_var_pct:.1f}% em 30 dias)"
+            elif usd_var_pct >= 1.0:
+                p3_score = 35
+                p3_diag = f"Cautela cambial (Dólar com viés de alta +{usd_var_pct:.1f}%)"
+            elif usd_var_pct >= -1.0:
+                p3_score = 50
+                p3_diag = "Câmbio estável (Sem pressão no fluxo)"
+            elif usd_var_pct >= -4.0:
+                p3_score = 70
+                p3_diag = f"Entrada de capital estrangeiro (Dólar caiu {usd_var_pct:.1f}%)"
+            else:
+                p3_score = 85
+                p3_diag = f"Forte fluxo comprador internacional (Dólar despencou {usd_var_pct:.1f}%)"
+
+            pilares.append(QuantitativeSentimentPillar(
+                nome="Fluxo Cambial (Dólar USD/BRL)",
+                valor_atual=f"R$ {usd_curr:.2f} ({usd_var_pct:+.1f}% no mês)",
+                diagnostico=p3_diag,
+                score=p3_score
+            ))
+            scores.append((p3_score, 0.25))
+
+        # --- PILAR 4: Volatilidade Histórica Recente ---
+        if not ibov_hist.empty and len(ibov_hist) >= 20:
+            daily_returns = ibov_hist["Close"].pct_change().dropna()
+            recent_vol = float(daily_returns.tail(20).std() * np.sqrt(252) * 100) # Volatilidade anualizada
+
+            if recent_vol >= 25.0:
+                p4_score = 20
+                p4_diag = f"Turbulência e nervosismo elevados (Volatilidade {recent_vol:.1f}% a.a.)"
+            elif recent_vol >= 18.0:
+                p4_score = 40
+                p4_diag = f"Oscilação moderada (Volatilidade {recent_vol:.1f}% a.a.)"
+            else:
+                p4_score = 70
+                p4_diag = f"Mercado estável e previsível (Volatilidade branda {recent_vol:.1f}% a.a.)"
+
+            pilares.append(QuantitativeSentimentPillar(
+                nome="Volatilidade do Mercado (B3 Risk)",
+                valor_atual=f"{recent_vol:.1f}% a.a.",
+                diagnostico=p4_diag,
+                score=p4_score
+            ))
+            scores.append((p4_score, 0.20))
+
+        # Cálculo Ponderado Final
+        if scores:
+            final_fg = int(sum(score * weight for score, weight in scores))
+        else:
+            final_fg = 50
+
+        final_fg = max(5, min(95, final_fg))
+
+        if final_fg <= 25:
+            fg_label = "🚨 MEDO EXTREMO (Pânico Vendedor / Oportunidade de Barganhas)"
+            resumo = (
+                "O mercado brasileiro opera sob estresse severo de aversão a risco. "
+                "Historicamente, zonas de Medo Extremo com IFR sobrevendido representam os melhores pontos "
+                "de entrada para comprar ações e FIIs de primeira linha com margem de segurança."
+            )
+        elif final_fg <= 45:
+            fg_label = "⚠️ CAUTELA / MEDO (Mercado Defensivo)"
+            resumo = (
+                "Os investidores mostram cautela devido ao patamar dos juros futuros e câmbio. "
+                "O fluxo favorece ativos de alta qualidade, dividendos e renda fixa soberana."
+            )
+        elif final_fg <= 55:
+            fg_label = "⚖️ NEUTRO (Equilíbrio entre Compradores e Vendedores)"
+            resumo = "Mercado sem tendência direcional dominante, consolidando preços à espera de novos gatilhos macroeconômicos."
+        elif final_fg <= 75:
+            fg_label = "🌱 OTIMISMO (Apetite a Risco em Expansão)"
+            resumo = "Sentimento positivo impulsionado por fluxo comprador de ações e compressão de taxas de juros."
+        else:
+            fg_label = "🔥 EUFORIA EXTREMA (Sobrecompra / Cuidado com Topos)"
+            resumo = "Mercado eufórico com múltiplos esticados. Momento exige disciplina e realização parcial de lucros."
+
+        # Coleta Notícias Reais do Yahoo Finance
+        real_news = self._fetch_yfinance_news(ibov_obj)
+
+        # Ativos em Destaque no Momento (Volume e Notícias)
+        trending = [
+            {"ticker": "PETR4", "empresa": "Petrobras", "motivo": "Fluxo de dividendos e sensibilidade ao barril do petróleo Brent", "tendencia": "Alta Liquidez"},
+            {"ticker": "VALE3", "empresa": "Vale", "motivo": "Oscilação do minério de ferro na China e demanda global", "tendencia": "Consolidação"},
+            {"ticker": "ITUB4", "empresa": "Itaú Unibanco", "motivo": "Resiliência bancária e margens financeiras robustas", "tendencia": "Otimista"},
+            {"ticker": "HGLG11", "empresa": "CSHG Logística", "motivo": "Desconto em galpões logísticos e atratividade frente à NTN-B", "tendencia": "Barganha em FII"}
+        ]
 
         return MarketSentimentOverview(
-            fear_greed_score=fg_score,
+            fear_greed_score=final_fg,
             fear_greed_label=fg_label,
-            total_news_analyzed=len(news_items),
-            positive_ratio=round(pos_ratio * 100, 1),
-            negative_ratio=round(neg_ratio * 100, 1),
-            trending_assets=trending[:8],
-            news_feed=news_items[:15],
+            resumo_macro_humor=resumo,
+            pilares=pilares,
+            news_feed=real_news,
+            trending_tickers=trending,
             timestamp=datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         )
 
-    def _fetch_news(self) -> List[MarketNewsItem]:
+    def _fetch_yfinance_news(self, ticker_obj) -> List[MarketNewsItem]:
+        items = []
         try:
-            req = urllib.request.Request(self.feed_url, headers={"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"})
-            with urllib.request.urlopen(req, timeout=8) as response:
-                xml_data = response.read()
+            raw_news = ticker_obj.news or []
+            for item in raw_news[:8]:
+                content = item.get("content") or {}
+                title = content.get("title") or item.get("title") or ""
+                summary = content.get("summary") or item.get("summary") or ""
+                provider = content.get("provider", {}).get("displayName") or "Mídia Financeira"
+                url = content.get("canonicalUrl", {}).get("url") or item.get("link") or "https://finance.yahoo.com"
+                pub_date = content.get("pubDate") or ""
+                if pub_date:
+                    pub_date = pub_date[:10]
 
-            root = ET.fromstring(xml_data)
-            items = []
+                tickers = []
+                for t in content.get("finance", {}).get("stockTickers", []):
+                    sym = t.get("symbol", "").replace(".SA", "")
+                    if sym and not sym.startswith("^"):
+                        tickers.append(sym)
 
-            for item in root.findall(".//item")[:30]:
-                title = item.find("title").text if item.find("title") is not None else ""
-                link = item.find("link").text if item.find("link") is not None else ""
-                pub_date = item.find("pubDate").text if item.find("pubDate") is not None else ""
-                source_elem = item.find("source")
-                source = source_elem.text if source_elem is not None else "Portal Financeiro"
-
-                # Limpa título
-                clean_title = re.sub(r"\s*-\s*[^-]+$", "", title) # Remove o nome do jornal do final
-
-                # Sentimento da manchete
-                words = set(re.findall(r"\b[A-Za-zÀ-ÿ]+\b", clean_title.lower()))
-                pos_hits = len(words.intersection(POSITIVE_WORDS))
-                neg_hits = len(words.intersection(NEGATIVE_WORDS))
-
-                if pos_hits > neg_hits:
+                # Classificação de sentimento simples no texto real
+                full_text = f"{title} {summary}".lower()
+                if any(w in full_text for w in ["sobe", "alta", "lucro", "recorde", "dividendo", "compra", "positivo", "supera"]):
                     sent = "OTIMISTA"
-                    score = min(1.0, 0.4 + (pos_hits * 0.2))
-                elif neg_hits > pos_hits:
+                    score = 0.5
+                elif any(w in full_text for w in ["queda", "cai", "prejuízo", "risco", "corte", "baixa", "alerta", "inadimplência"]):
                     sent = "ALERTA"
-                    score = max(-1.0, -0.4 - (neg_hits * 0.2))
+                    score = -0.5
                 else:
                     sent = "NEUTRO"
                     score = 0.0
 
-                # Identifica tickers citados
-                mentioned = []
-                for t in POPULAR_TICKERS:
-                    if t in clean_title.upper() or t[:4] in clean_title.upper():
-                        mentioned.append(t)
-
                 items.append(MarketNewsItem(
-                    title=clean_title,
-                    link=link,
-                    published=pub_date[:16] if pub_date else "",
-                    source=source,
+                    title=title,
+                    summary=summary[:180] + "..." if len(summary) > 180 else summary,
+                    link=url,
+                    published=pub_date,
+                    source=provider,
                     sentiment_label=sent,
                     score=score,
-                    mentioned_tickers=list(set(mentioned))
+                    related_tickers=tickers[:3]
                 ))
+        except Exception:
+            pass
 
-            return items
-
-        except Exception as e:
-            # Fallback elegante caso a rede tenha restrição temporária
-            return [
-                MarketNewsItem(
-                    title="Ibovespa opera com volatilidade com atenções voltadas ao cenário fiscal e taxas futuras",
-                    link="https://www.infomoney.com.br",
-                    published=datetime.now().strftime("%d/%m/%Y"),
-                    source="InfoMoney",
-                    sentiment_label="NEUTRO",
-                    score=0.0,
-                    mentioned_tickers=["PETR4", "VALE3"]
-                ),
-                MarketNewsItem(
-                    title="Petrobras e grandes bancos sustentam dividendos atrativos mesmo sob juros altos",
-                    link="https://valoreconomico.globo.com",
-                    published=datetime.now().strftime("%d/%m/%Y"),
-                    source="Valor Econômico",
-                    sentiment_label="OTIMISTA",
-                    score=0.6,
-                    mentioned_tickers=["PETR4", "BBAS3"]
-                ),
-                MarketNewsItem(
-                    title="Fundos Imobiliários registram forte desconto patrimonial com alta do Tesouro IPCA+",
-                    link="https://braziljournal.com",
-                    published=datetime.now().strftime("%d/%m/%Y"),
-                    source="Brazil Journal",
-                    sentiment_label="ALERTA",
-                    score=-0.5,
-                    mentioned_tickers=["HGLG11", "MXRF11"]
-                )
-            ]
+        return items

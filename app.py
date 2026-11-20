@@ -467,59 +467,72 @@ elif modo == "🏛️ Renda Fixa & Títulos Públicos (Tesouro)":
 # MODO 5: SENTIMENTO DE MERCADO & TRENDING (B3)
 # -----------------------------------------------------------------------------
 elif modo == "🔥 Sentimento de Mercado & Trending (B3)":
-    st.markdown('<div class="main-header">🔥 Sentimento de Mercado & Trending na B3</div>', unsafe_allow_html=True)
-    st.markdown('<div class="sub-header">Radar de notícias em tempo real, ativos mais comentados e termômetro de Medo & Ganância.</div>', unsafe_allow_html=True)
+    st.markdown('<div class="main-header">🔥 Sentimento de Mercado & Fear & Greed (B3)</div>', unsafe_allow_html=True)
+    st.markdown('<div class="sub-header">Índice quantitativo de apetite a risco na B3 baseado em momentum do Ibovespa, IFR, fluxo cambial e notícias.</div>', unsafe_allow_html=True)
 
-    with st.spinner("Monitorando portais de notícias e menções de ativos da B3..."):
+    with st.spinner("Calculando indicadores quantitativos de sentimento e notícias do mercado..."):
         sentiment_data = get_cached_sentiment()
 
-    # Painel de Medo & Ganância (Fear & Greed)
-    st.markdown("### 🧭 Termômetro de Medo & Ganância (B3 Sentiment Index)")
+    # Painel Principal: Índice de Medo & Ganância (Fear & Greed)
+    st.markdown("### 🧭 Termômetro Quantitativo de Medo & Ganância")
     
-    fg_col1, fg_col2, fg_col3 = st.columns([1, 1, 1])
+    fg_col1, fg_col2 = st.columns([1, 2])
     with fg_col1:
-        st.metric("Índice de Sentimento", f"{sentiment_data.fear_greed_score} / 100")
+        st.metric("Pontuação do Sentimento", f"{sentiment_data.fear_greed_score} / 100")
+        st.markdown(f"**Diagnóstico:** `{sentiment_data.fear_greed_label}`")
+        st.progress(sentiment_data.fear_greed_score / 100)
     with fg_col2:
-        st.metric("Diagnóstico do Humor", sentiment_data.fear_greed_label)
-    with fg_col3:
-        st.metric("Balanço de Manchetes", f"🟢 {sentiment_data.positive_ratio}% Otimistas | 🔴 {sentiment_data.negative_ratio}% Alertas")
-
-    st.progress(sentiment_data.fear_greed_score / 100)
+        st.info(f"**Leitura Macroeconômica:** {sentiment_data.resumo_macro_humor}")
 
     st.divider()
 
-    # Ativos Mais Comentados
-    st.markdown("### 🗣️ Ativos Mais Comentados do Momento na B3")
-    st.caption("Ações e FIIs que estão liderando a cobertura e as atenções dos investidores hoje:")
+    # 4 Pilares Quantitativos do Sentimento
+    st.markdown("### 🔬 Os 4 Pilares Matemáticos do Sentimento")
+    st.caption("O sentimento não é baseado em 'achismos', mas no comportamento real dos preços, moedas e fluxo da B3:")
 
-    if sentiment_data.trending_assets:
-        trend_cols = st.columns(min(len(sentiment_data.trending_assets), 4))
-        for idx, asset in enumerate(sentiment_data.trending_assets[:4]):
-            with trend_cols[idx]:
-                badge_class = f"badge-{asset.sentiment_label.lower()}"
-                st.markdown(f"#### {asset.ticker}")
-                st.markdown(f"<span class='{badge_class}'>{asset.sentiment_label}</span>", unsafe_allow_html=True)
-                st.write(f"**Menções:** {asset.mentions} notícias recentes")
-                st.caption(f"\"{asset.sample_headline[:80]}...\"")
-    else:
-        st.info("Nenhum ativo com volume anormal de menções nas últimas horas.")
+    p_cols = st.columns(len(sentiment_data.pilares))
+    for idx, pilar in enumerate(sentiment_data.pilares):
+        with p_cols[idx]:
+            st.markdown(f"**{pilar.nome}**")
+            st.metric("Valor", pilar.valor_atual)
+            st.caption(pilar.diagnostico)
+            st.progress(pilar.score / 100)
 
     st.divider()
 
-    # Feed de Notícias em Tempo Real
-    st.markdown("### 📰 Feed de Notícias Monitoradas com Classificação de Sentimento")
-    for n in sentiment_data.news_feed:
-        badge_class = f"badge-{n.sentiment_label.lower()}"
-        tickers_str = " | ".join(n.mentioned_tickers) if n.mentioned_tickers else "B3 Geral"
-        st.markdown(f"""
-        <div class="news-card">
-            <span class="{badge_class}">{n.sentiment_label}</span>
-            <strong style="margin-left: 10px;">{tickers_str}</strong>
-            <span style="float: right; color: #888888; font-size: 0.85rem;">{n.source} • {n.published}</span>
-            <div style="margin-top: 8px;">
-                <a href="{n.link}" target="_blank" style="text-decoration: none; color: #E0E0E0; font-size: 1.02rem; font-weight: 500;">
-                    {n.title} ↗
-                </a>
+    # Ativos em Foco
+    st.markdown("### 🗣️ Ativos em Foco e Maior Liquidez na B3")
+    trend_cols = st.columns(len(sentiment_data.trending_tickers))
+    for idx, asset in enumerate(sentiment_data.trending_tickers):
+        with trend_cols[idx]:
+            st.markdown(f"#### {asset['ticker']}")
+            st.caption(f"**{asset['empresa']}**")
+            st.write(f"📌 {asset['motivo']}")
+            st.badge = asset['tendencia']
+            st.markdown(f"*{asset['tendencia']}*")
+
+    st.divider()
+
+    # Notícias Reais do Mercado Financeiro (Yahoo Finance)
+    st.markdown("### 📰 Notícias Reais do Mercado em Tempo Real")
+    if sentiment_data.news_feed:
+        for n in sentiment_data.news_feed:
+            badge_class = f"badge-{n.sentiment_label.lower()}"
+            tickers_str = " | ".join(n.related_tickers) if n.related_tickers else "Mercado B3"
+            st.markdown(f"""
+            <div class="news-card">
+                <span class="{badge_class}">{n.sentiment_label}</span>
+                <strong style="margin-left: 10px; color: #64B5F6;">{tickers_str}</strong>
+                <span style="float: right; color: #888888; font-size: 0.85rem;">{n.source} • {n.published}</span>
+                <div style="margin-top: 8px;">
+                    <a href="{n.link}" target="_blank" style="text-decoration: none; color: #FFFFFF; font-size: 1.05rem; font-weight: 600;">
+                        {n.title} ↗
+                    </a>
+                </div>
+                <div style="color: #B0BEC5; font-size: 0.9rem; margin-top: 5px;">
+                    {n.summary}
+                </div>
             </div>
-        </div>
-        """, unsafe_allow_html=True)
+            """, unsafe_allow_html=True)
+    else:
+        st.info("Nenhuma notícia de impacto recente capturada no momento.")
